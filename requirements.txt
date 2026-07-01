@@ -1,0 +1,2 @@
+# 只有 chart.py 畫圖需要；fetch.py / stats.py 是純標準庫，不需安裝任何東西。
+matplotlib>=3.5

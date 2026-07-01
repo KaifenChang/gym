@@ -16,10 +16,14 @@ POST https://booking-tpsc.sporetrofit.com/Home/loadLocationPeopleNum
 
 | 檔案 | 說明 |
 |------|------|
-| `fetch.py` | 抓一次資料並追加到 `data/sssc.csv`（純標準庫，零依賴） |
-| `stats.py` | 讀 CSV，印出依時段／星期的平均人數統計 |
+| `fetch.py` | 抓資料並追加到 `data/sssc.csv`（純標準庫，零依賴） |
+| `stats.py` | 讀 CSV，印出依時段／星期的平均人數統計（文字版，零依賴） |
+| `chart.py` | 讀 CSV，畫出趨勢圖 `chart.png`（需 matplotlib） |
 | `data/sssc.csv` | 歷史資料 |
-| `.github/workflows/track.yml` | GitHub Actions 排程，每 10 分鐘抓一次 |
+| `.github/workflows/track.yml` | GitHub Actions 排程，自動持續抓取 |
+
+**游泳池每日 10:00–10:30 清場**，這段人數會歸零。`stats.py` 與 `chart.py` 在統計／
+畫圖時，會自動把游泳池的這半小時排除，以免把「強制清場」誤算成「離峰」（健身房不受影響）。
 
 CSV 欄位：`timestamp_taipei, timestamp_utc, weekday, sw_people, sw_max, gym_people, gym_max`
 （`sw` = 游泳池 swimming、`gym` = 健身房；`weekday` 0=週一 .. 6=週日）
@@ -29,9 +33,13 @@ CSV 欄位：`timestamp_taipei, timestamp_utc, weekday, sw_people, sw_max, gym_p
 ```bash
 python3 fetch.py                              # 抓一次
 python3 fetch.py --interval 600 --duration-minutes 240   # 持續 4 小時、每 10 分鐘一筆
-python3 stats.py     # 看統計
+python3 stats.py     # 看統計（文字版）
 python3 stats.py --pool   # 只看游泳池
 python3 stats.py --gym    # 只看健身房
+
+pip install -r requirements.txt   # 畫圖前先裝 matplotlib（只需一次）
+python3 chart.py             # 畫趨勢圖 → chart.png
+python3 chart.py --days 7    # 只畫最近 7 天
 ```
 
 `fetch.py` 參數：
