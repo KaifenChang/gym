@@ -28,7 +28,9 @@ jobs:
           python-version: "3.12"
 
       - name: 抓取即時人數
-        run: python fetch.py
+        # 每次觸發連續抓 4 筆、每 3 分鐘一筆（涵蓋約 9 分鐘）。
+        # GitHub 排程可能延遲或跳過，這樣即使間隔拉長也能補齊資料密度。
+        run: python fetch.py --samples 4 --interval 180
 
       - name: Commit 新資料
         run: |
