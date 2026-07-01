@@ -11,6 +11,7 @@ import argparse
 import csv
 import json
 import os
+import subprocess
 import time
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -18,6 +19,8 @@ from datetime import datetime, timezone, timedelta
 API_URL = "https://booking-tpsc.sporetrofit.com/Home/loadLocationPeopleNum"
 TARGET_LID = "SSSC"  # 松山
 TAIPEI = timezone(timedelta(hours=8))
+OPEN_HOUR = 6    # 營業起始（台北時間）
+CLOSE_HOUR = 22  # 營業結束（台北時間）
 DATA_FILE = os.path.join(os.path.dirname(__file__), "data", "sssc.csv")
 HEADER = [
     "timestamp_taipei",  # 台北時間，方便直接閱讀
@@ -82,23 +85,70 @@ def sample_once():
     )
 
 
+def git_push():
+    """把新資料 commit 並 push 回 remote，容忍偶發衝突。
+
+    在 GitHub Actions 長時間執行時，每抓一筆就 push 一次，
+    這樣就算 job 中途被砍，已抓的資料也已經安全存進 remote。
+    """
+    def run(*args):
+        return subprocess.run(["git", *args], cwd=os.path.dirname(__file__) or ".",
+                              capture_output=True, text=True)
+
+    if not run("diff", "--quiet", "--", DATA_FILE).returncode:
+        return  # 沒有變化就不 commit
+    run("add", DATA_FILE)
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+    run("commit", "-m", f"data: 松山人數 {stamp}")
+    # 先 rebase 再 push，重試幾次以應付偶發並行衝突
+    for _ in range(3):
+        run("pull", "--rebase", "--autostash")
+        if run("push").returncode == 0:
+            return
+        time.sleep(2)
+    print("push 失敗（已重試 3 次），下一筆會再嘗試", flush=True)
+
+
+def within_hours(now):
+    return OPEN_HOUR <= now.hour < CLOSE_HOUR
+
+
 def main():
-    # GitHub 排程不準時（可能延遲甚至跳過），所以每次觸發連續抓多筆，
-    # 讓每次醒來都能補齊一小段時間的資料，降低漏抓影響。
+    # GitHub 排程「觸發頻率」不可靠，但 job 內的 sleep 是精準的。
+    # 所以改成：一天低頻觸發幾次，每次觸發後這個 job 就持續跑好幾個小時，
+    # 內部精準地每隔 interval 抓一筆，直到 duration 到或超過營業時間為止。
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--samples", type=int, default=1,
-                        help="這次總共抓幾筆（預設 1）")
-    parser.add_argument("--interval", type=int, default=180,
-                        help="每筆之間相隔幾秒（預設 180 = 3 分鐘）")
+    parser.add_argument("--interval", type=int, default=600,
+                        help="每筆之間相隔幾秒（預設 600 = 10 分鐘）")
+    parser.add_argument("--duration-minutes", type=int, default=0,
+                        help="持續執行幾分鐘；0（預設）表示只抓一筆就結束")
+    parser.add_argument("--push", action="store_true",
+                        help="每抓一筆就 git commit + push（給 CI 用）")
     args = parser.parse_args()
 
-    for i in range(args.samples):
+    def one():
         try:
             sample_once()
-        except Exception as exc:  # 單筆失敗不要中斷整批
-            print(f"抓取失敗（第 {i + 1} 筆）：{exc}", flush=True)
-        if i < args.samples - 1:
+            if args.push:
+                git_push()
+        except Exception as exc:  # 單筆失敗不要中斷整個迴圈
+            print(f"抓取失敗：{exc}", flush=True)
+
+    if args.duration_minutes <= 0:
+        one()
+        return
+
+    end = time.time() + args.duration_minutes * 60
+    while time.time() < end:
+        if within_hours(datetime.now(TAIPEI)):
+            one()
+        else:
+            print("非營業時段，停止本次執行", flush=True)
+            break
+        if time.time() + args.interval < end:
             time.sleep(args.interval)
+        else:
+            break
 
 
 if __name__ == "__main__":

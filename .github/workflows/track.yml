@@ -1,14 +1,17 @@
 name: 追蹤松山運動中心人數
 
 on:
-  # 每 10 分鐘一次，只在台北營業時段（06:00–22:00，即 UTC 22:00–13:59）。
-  # 註：GitHub 的排程為 UTC，且在尖峰時可能延遲數分鐘。
+  # 一天只觸發 4 次（低頻率，GitHub 排程才可靠）。
+  # 每次觸發後 job 會持續跑約 4 小時，內部精準每 10 分鐘抓一筆。
+  # 觸發時間（UTC）對應台北 06:00 / 10:00 / 14:00 / 18:00：
   schedule:
-    - cron: "*/10 0-13,22,23 * * *"
-  # 允許手動觸發測試
+    - cron: "0 22 * * *"   # 台北 06:00
+    - cron: "0 2 * * *"    # 台北 10:00
+    - cron: "0 6 * * *"    # 台北 14:00
+    - cron: "0 10 * * *"   # 台北 18:00
   workflow_dispatch:
 
-# 允許 workflow 把新資料 commit 回 repo
+# 允許 workflow 把新資料 push 回 repo
 permissions:
   contents: write
 
@@ -18,8 +21,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  fetch:
+  track:
     runs-on: ubuntu-latest
+    # 每次跑約 4 小時，設定 4.5 小時上限保險（runner 單 job 上限為 6 小時）
+    timeout-minutes: 270
     steps:
       - uses: actions/checkout@v4
 
@@ -27,21 +32,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: 抓取即時人數
-        # 每次觸發連續抓 4 筆、每 3 分鐘一筆（涵蓋約 9 分鐘）。
-        # GitHub 排程可能延遲或跳過，這樣即使間隔拉長也能補齊資料密度。
-        run: python fetch.py --samples 4 --interval 180
-
-      - name: Commit 新資料
+      - name: 設定 git 身分
         run: |
           git config user.name  "occupancy-bot"
           git config user.email "occupancy-bot@users.noreply.github.com"
-          if git diff --quiet -- data/sssc.csv; then
-            echo "沒有新資料，略過 commit"
-            exit 0
-          fi
-          git add data/sssc.csv
-          git commit -m "data: 松山人數 $(date -u +%Y-%m-%dT%H:%MZ)"
-          # push 前先 rebase，避免與其他排程執行衝突
-          git pull --rebase --autostash origin ${GITHUB_REF_NAME}
-          git push
+
+      - name: 持續抓取（每 10 分鐘一筆，跑約 4 小時）
+        # 240 分鐘 ÷ 10 分鐘 ≈ 24 筆；每抓一筆就 push，資料即時落地。
+        # 超過台北 22:00 會自動停止。
+        run: python fetch.py --interval 600 --duration-minutes 240 --push
