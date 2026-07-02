@@ -1,0 +1,53 @@
+name: 每日趨勢圖
+
+on:
+  # 每天中午、晚上各生一張圖（時間為 UTC，對應台北 12:00 與 21:00）
+  schedule:
+    - cron: "0 4 * * *"    # 台北 12:00 中午
+    - cron: "0 13 * * *"   # 台北 21:00 晚上
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-chart
+  cancel-in-progress: false
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安裝相依與中文字型
+        run: |
+          pip install -r requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk
+
+      - name: 產生趨勢圖（存到 data/）
+        run: |
+          DATE=$(TZ='Asia/Taipei' date +%F)
+          HOUR=$(TZ='Asia/Taipei' date +%H)
+          if [ "$HOUR" -lt 15 ]; then SLOT=noon; else SLOT=evening; fi
+          OUT="data/chart_${DATE}_${SLOT}.png"
+          python chart.py --output "$OUT"
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+
+      - name: Commit 圖檔
+        run: |
+          git config user.name  "occupancy-bot"
+          git config user.email "occupancy-bot@users.noreply.github.com"
+          git add data/
+          if git diff --cached --quiet; then
+            echo "沒有新圖，略過"
+            exit 0
+          fi
+          git commit -m "chart: ${OUT}"
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}"
+          git push

@@ -16,6 +16,7 @@
 
 import argparse
 import csv
+import glob
 import os
 import sys
 from collections import defaultdict
@@ -39,9 +40,15 @@ def setup_cjk_font():
     candidates = [
         "/System/Library/Fonts/PingFang.ttc",          # macOS
         "/System/Library/Fonts/Hiragino Sans GB.ttc",  # macOS
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux
-        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",            # Linux
     ]
+    # 各平台常見目錄裡任何 CJK 字型（Linux/CI 上檔名可能不同，用萬用字元掃）
+    for pattern in (
+        "/usr/share/fonts/**/*CJK*.ttc",
+        "/usr/share/fonts/**/*CJK*.otf",
+        "/usr/share/fonts/**/wqy*.ttc",
+    ):
+        candidates += sorted(glob.glob(pattern, recursive=True))
+
     for path in candidates:
         if os.path.exists(path):
             font_manager.fontManager.addfont(path)
@@ -114,6 +121,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=0,
                         help="只畫最近幾天（預設 0 = 全部）")
+    parser.add_argument("--output", default=OUT_FILE,
+                        help=f"輸出圖檔路徑（預設 {OUT_FILE}）")
     args = parser.parse_args()
 
     if not os.path.exists(DATA_FILE):
@@ -122,13 +131,15 @@ def main():
     if not data:
         sys.exit("沒有可畫的資料。")
 
+    out = args.output
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     setup_cjk_font()
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(11, 9))
     plot_timeseries(ax1, data)
     plot_hourly(ax2, data)
     fig.tight_layout()
-    fig.savefig(OUT_FILE, dpi=120)
-    print(f"已輸出 {OUT_FILE}（{len(data)} 筆資料，游泳池已排除 10:00–10:30 清場時段）")
+    fig.savefig(out, dpi=120)
+    print(f"已輸出 {out}（{len(data)} 筆資料，游泳池已排除 10:00–10:30 清場時段）")
 
 
 if __name__ == "__main__":
